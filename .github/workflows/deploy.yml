@@ -1,0 +1,72 @@
+name: Create Release
+
+on:
+  release:
+    types: [created]  # 当有新 release 创建时触发
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 1. 检出代码（包含标签信息）
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.release.tag_name }}  # 检出对应标签的代码
+
+    # 2. 设置 Node.js 环境
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    # 3. 安装依赖
+    - name: Install dependencies
+      run: npm install
+
+    # 4. 构建项目
+    - name: Build project
+      run: npm run build
+
+    # 5. 准备发布文件
+    - name: Prepare release assets
+      run: |
+        # 创建时间戳
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        
+        # 打包构建产物
+        tar -czf blog-build-$TIMESTAMP.tar.gz ./dist
+        
+        # 打包纯净源码（排除开发依赖）
+        tar -czf source-code-$TIMESTAMP.tar.gz \
+          --exclude='node_modules' \
+          --exclude='.git' \
+          --exclude='.github' \
+          .
+        
+        # 创建版本信息文件
+        echo "Version: ${{ github.event.release.tag_name }}" > version.txt
+        echo "Build Date: $(date)" >> version.txt
+        echo "Commit: ${{ github.sha }}" >> version.txt
+
+    # 6. 上传资源到 Release
+    - name: Upload Release Assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}  # 使用自动提供的上传URL
+        asset_path: ./*.tar.gz
+        asset_name: ${{ github.event.release.tag_name }}-${{ asset_path }}
+
+    # 7. 上传版本信息文件
+    - name: Upload Version Info
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./version.txt
+        asset_name: build-info-${{ github.event.release.tag_name }}.txt
