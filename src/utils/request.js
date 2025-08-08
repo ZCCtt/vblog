@@ -16,7 +16,9 @@ service.interceptors.request.use(
             if (config.url.indexOf("?") >= 0) {
                 sp = "&"
             }
-            config.url = config.url + sp + "access_token=" + token
+            //config.url = config.url + sp + "access_token=" + token
+          config.headers = {
+'Authorization': 'token ' + token
         }
         return config
     },
