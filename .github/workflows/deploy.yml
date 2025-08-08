@@ -28,7 +28,6 @@ jobs:
 
     # 4. 构建项目
     - name: Build project
-      run: npm run dev
       run: npm run build
 
     # 5. 生成版本号（基于日期时间）
