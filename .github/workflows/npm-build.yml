@@ -8,11 +8,11 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04  # 使用较旧的 Ubuntu 版本获取兼容的 OpenSSL
     strategy:
       matrix:
-        # 使用 Node 14.x 确保 Vue2 + Webpack3 兼容性
-        node-version: [14.x]
+        # 使用 Node.js 12.x (Vue2/Webpack3 官方支持的最低版本)
+        node-version: [12.22.12]  # 指定精确版本确保兼容性
 
     steps:
     - name: Checkout repository
@@ -24,9 +24,11 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
 
-    # 解决 Webpack 3 在 Node 14+ 的 OpenSSL 兼容性问题
-    - name: Configure legacy OpenSSL
-      run: echo "NODE_OPTIONS=--openssl-legacy-provider" >> $GITHUB_ENV
+    # 配置环境变量解决兼容性问题
+    - name: Configure environment
+      run: |
+        echo "CI=true" >> $GITHUB_ENV
+        echo "NODE_OPTIONS=--max_old_space_size=4096" >> $GITHUB_ENV
 
     - name: Cache dependencies
       uses: actions/cache@v4
@@ -39,21 +41,21 @@ jobs:
 
     - name: Install dependencies
       run: |
-        npm ci --legacy-peer-deps
-      env:
-        NODE_OPTIONS: "--openssl-legacy-provider"
+        npm ci --legacy-peer-deps --no-audit
+        # 可选：修复已知兼容性问题
+        npm install webpack@3.12.0
 
     - name: Run unit tests
       run: npm run unit
-      env:
-        NODE_OPTIONS: "--openssl-legacy-provider"
 
     - name: Build production bundle
       run: npm run build
-      env:
-        NODE_OPTIONS: "--openssl-legacy-provider"
 
-    # 使用最新版 artifacts 上传
+    - name: Verify build output
+      run: |
+        ls -la dist/
+        [ -f dist/index.html ] || exit 1
+
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
