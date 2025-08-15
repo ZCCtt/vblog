@@ -2,7 +2,7 @@ name: VBlog CI/CD
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
   workflow_dispatch: # 启用手动触发
 
 jobs:
@@ -44,16 +44,23 @@ jobs:
       uses: actions/deploy-pages@v4
       if: ${{ github.ref == 'refs/heads/main' }}
     
-    # 手动触发时创建 Release
-    - name: Create Release (Manual Trigger)
+    - name: Get current time
+      id: get-time
+      run: echo "timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+    
+    # 使用替代方案创建 Release（推荐）
+    - name: Zip artifacts (Manual Trigger)
       if: ${{ github.event_name == 'workflow_dispatch' }}
-      id: create_release
-      uses: actions/create-release@v2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        cd dist
+        zip -r ../vblog-build-${{ github.run_number }}.zip .
+    
+    - name: Create Release and Upload Assets
+      if: ${{ github.event_name == 'workflow_dispatch' }}
+      uses: softprops/action-gh-release@v1
       with:
+        name: "Build ${{ github.run_number }}"
         tag_name: release-${{ github.run_id }}
-        release_name: "Build ${{ github.run_number }}"
         body: |
           **VBlog 手动构建发布**
           - 提交: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
@@ -61,27 +68,10 @@ jobs:
           - 构建时间: ${{ steps.get-time.outputs.timestamp }}
         draft: false
         prerelease: true
-    
-    - name: Zip artifacts (Manual Trigger)
-      if: ${{ github.event_name == 'workflow_dispatch' }}
-      run: |
-        cd dist
-        zip -r ../vblog-build-${{ github.run_number }}.zip .
-    
-    - name: Upload Release Asset (Manual Trigger)
-      if: ${{ github.event_name == 'workflow_dispatch' }}
-      uses: actions/upload-release-asset@v2
+        files: |
+          vblog-build-${{ github.run_number }}.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./vblog-build-${{ github.run_number }}.zip
-        asset_name: vblog-build-${{ github.run_number }}.zip
-        asset_content_type: application/zip
-    
-    - name: Get current time
-      id: get-time
-      run: echo "timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
     
     # 添加 Lighthouse 性能测试
     - name: Run Lighthouse audit
@@ -91,4 +81,3 @@ jobs:
           https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         uploadArtifacts: true
         temporaryPublicStorage: true
-        configPath: ./.github/lighthouserc.json # 可选的配置文件
