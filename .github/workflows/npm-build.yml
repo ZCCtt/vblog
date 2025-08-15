@@ -8,6 +8,7 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # 设置超时防止永久挂起
     permissions:
       contents: write
       pages: write
@@ -24,12 +25,35 @@ jobs:
         cache: 'npm'
     
     - name: Install dependencies
-      run: npm ci
+      run: |
+        echo "开始安装依赖..."
+        npm ci --no-progress --loglevel=error
+        echo "依赖安装完成"
     
     - name: Build project
-      run: npm run build
+      run: |
+        echo "开始构建项目..."
+        npm run build --silent
+        echo "构建完成"
       env:
         VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || 'https://api.example.com' }}
+      timeout-minutes: 10 # 设置构建超时
+    
+    - name: Verify build output
+      run: |
+        echo "检查构建结果..."
+        if [ ! -d "dist" ]; then
+          echo "错误：dist 目录不存在"
+          exit 1
+        fi
+        
+        if [ ! -f "dist/index.html" ]; then
+          echo "错误：index.html 未生成"
+          exit 1
+        fi
+        
+        echo "构建验证通过"
+        ls -lh dist/
     
     - name: Setup Pages
       uses: actions/configure-pages@v4
@@ -44,40 +68,26 @@ jobs:
       uses: actions/deploy-pages@v4
       if: ${{ github.ref == 'refs/heads/main' }}
     
-    - name: Get current time
-      id: get-time
-      run: echo "timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
-    
-    # 使用替代方案创建 Release（推荐）
-    - name: Zip artifacts (Manual Trigger)
-      if: ${{ github.event_name == 'workflow_dispatch' }}
+    # 添加详细的构建日志输出
+    - name: Print build logs
+      if: always() # 无论成功失败都运行
       run: |
-        cd dist
-        zip -r ../vblog-build-${{ github.run_number }}.zip .
+        echo "===== 最后20行构建日志 ====="
+        tail -n 20 build.log || echo "无构建日志"
     
-    - name: Create Release and Upload Assets
-      if: ${{ github.event_name == 'workflow_dispatch' }}
-      uses: softprops/action-gh-release@v1
+    # 添加缓存优化
+    - name: Cache dependencies
+      uses: actions/cache@v3
       with:
-        name: "Build ${{ github.run_number }}"
-        tag_name: release-${{ github.run_id }}
-        body: |
-          **VBlog 手动构建发布**
-          - 提交: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
-          - 部署预览: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-          - 构建时间: ${{ steps.get-time.outputs.timestamp }}
-        draft: false
-        prerelease: true
-        files: |
-          vblog-build-${{ github.run_number }}.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        path: |
+          node_modules
+          .npm
+        key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
     
-    # 添加 Lighthouse 性能测试
-    - name: Run Lighthouse audit
-      uses: treosh/lighthouse-ci-action@v11
+    # 添加资源监控
+    - name: Monitor resources
+      uses: nick-fields/action-resource-monitor@v1
       with:
-        urls: |
-          https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-        uploadArtifacts: true
-        temporaryPublicStorage: true
+        run-interval: 5 # 每5秒监控一次
