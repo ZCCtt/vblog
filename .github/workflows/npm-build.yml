@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04  # 使用较旧的 Ubuntu 版本获取兼容的 OpenSSL
+    runs-on: ubuntu-24  # 使用较旧的 Ubuntu 版本获取兼容的 OpenSSL
     strategy:
       matrix:
         # 使用 Node.js 12.x (Vue2/Webpack3 官方支持的最低版本)
