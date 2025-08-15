@@ -25,7 +25,7 @@ jobs:
         cache: 'npm'
 
     - name: Install dependencies
-      run: npm ci --prefer-offline
+      run: npm install
 
     - name: Build project
       run: npm run dev build  # 执行编译命令
