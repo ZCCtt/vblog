@@ -7,22 +7,32 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build-test-deploy:
+  build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [16.x]  # Vue2 官方推荐 Node 14+，16.x LTS 兼容性最佳
+        # Vue2 官方要求 Node >=6，但 Webpack 3 在 Node 14 运行最稳定
+        node-version: [14.x]
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
     - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v3
       with:
         node-version: ${{ matrix.node-version }}
+        # 使用 legacy 缓存方式确保旧版 npm 兼容
         cache: 'npm'
+        cache-dependency-path: 'package-lock.json'
 
+    # 解决 Webpack 3 在 GitHub Actions 中的兼容性问题
+    - name: Configure environment
+      run: |
+        echo "NODE_OPTIONS=--openssl-legacy-provider" >> $GITHUB_ENV
+        echo "CI=true" >> $GITHUB_ENV
+
+    # 显式缓存 node_modules 提升性能
     - name: Cache dependencies
       uses: actions/cache@v3
       id: npm-cache
@@ -30,32 +40,38 @@ jobs:
         path: |
           node_modules
           .npm
-        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('package-lock.json') }}
         restore-keys: |
-          ${{ runner.os }}-node-
+          ${{ runner.os }}-node-${{ matrix.node-version }}-
 
     - name: Install dependencies
-      if: steps.npm-cache.outputs.cache-hit != 'true'
-      run: npm ci
+      # 使用 npm ci 确保精确依赖版本
+      run: npm ci --legacy-peer-deps
+      env:
+        NODE_OPTIONS: "--openssl-legacy-provider"
 
     - name: Run unit tests
       run: npm run unit
+      env:
+        NODE_OPTIONS: "--openssl-legacy-provider"
 
-    - name: Build project
+    - name: Build production bundle
       run: npm run build
+      env:
+        NODE_OPTIONS: "--openssl-legacy-provider"
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       with:
         name: dist
         path: dist/
-        retention-days: 1
+        retention-days: 3
 
-    # 部署到 GitHub Pages (可选)
+    # 可选：部署到 GitHub Pages
     - name: Deploy to GitHub Pages
-      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && success()
       uses: peaceiris/actions-gh-pages@v3
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         publish_dir: ./dist
-        keep_files: false
+        force_orphan: true  # 确保只保留最新部署
