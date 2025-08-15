@@ -1,18 +1,17 @@
-name: Vue 2 Build and Deploy
+name: Vue 2 CI Pipeline
 
 on:
   push:
-    branches: [ master ]  # 触发分支，根据你的主分支名修改
+    branches: [ main, master ]
   pull_request:
-    branches: [ master ]
+    branches: [ main, master ]
 
 jobs:
-  build-and-deploy:
+  build-test-deploy:
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
-        node-version: [16.x]  # Vue2 官方推荐 Node 14+，16.x LTS 更稳定
+        node-version: [16.x]  # Vue2 官方推荐 Node 14+，16.x LTS 兼容性最佳
 
     steps:
     - name: Checkout repository
@@ -24,8 +23,23 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
 
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      id: npm-cache
+      with:
+        path: |
+          node_modules
+          .npm
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
     - name: Install dependencies
-      run: npm install
+      if: steps.npm-cache.outputs.cache-hit != 'true'
+      run: npm ci
+
+    - name: Run unit tests
+      run: npm run unit
 
     - name: Build project
       run: npm run build
@@ -36,3 +50,12 @@ jobs:
         name: dist
         path: dist/
         retention-days: 1
+
+    # 部署到 GitHub Pages (可选)
+    - name: Deploy to GitHub Pages
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./dist
+        keep_files: false
