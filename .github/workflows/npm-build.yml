@@ -1,66 +1,79 @@
-name: Release on README Update
+name: Build and Release on Master Push
 
 on:
   push:
-    paths:
-      - 'README.md'  # 仅当 README.md 更改时触发
+    branches:
+      - master  # 仅 master 分支推送时触发
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write  # 允许创建 Release
-      packages: write  # 允许上传产物
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0  # 获取完整提交历史
-
+    
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
         cache: 'npm'
-
+    
     - name: Install dependencies
-      run: npm install
-
+      run: npm ci
+    
+    - name: Run tests
+      run: npm test
+    
     - name: Build project
-      run: npm run dev build  # 执行编译命令
-
+      run: npm run build
+    
+    - name: Get version from package.json
+      id: package-version
+      run: |
+        VERSION=$(node -p "require('./package.json').version")
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Using version: $VERSION"
+    
+    - name: Zip artifacts
+      run: |
+        cd dist
+        zip -r ../build-${{ github.run_number }}.zip .
+    
     - name: Create Release
       id: create_release
       uses: actions/create-release@v1
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 自动生成的令牌
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: readme-update-${{ github.run_id }}  # 唯一标签
-        release_name: "Build ${{ github.run_id }} (README Update)"
+        tag_name: v${{ steps.package-version.outputs.version }}-${{ github.run_number }}
+        release_name: Release v${{ steps.package-version.outputs.version }} (Build #${{ github.run_number }})
         body: |
-          Automated release triggered by README.md update
-          - Commit: ${{ github.sha }}
-          - Date: ${{ steps.get_timestamp.outputs.timestamp }}
+          **自动构建发布**
+          - 触发提交: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          - 提交者: @${{ github.actor }}
+          - 工作流运行: [#${{ github.run_number }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          - 构建时间: ${{ steps.get-time.outputs.timestamp }}
         draft: false
         prerelease: false
-
-    - name: Get UTC timestamp
-      id: get_timestamp
-      run: echo "timestamp=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
-
+    
+    - name: Get current time
+      id: get-time
+      run: echo "timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+    
     - name: Upload Release Asset
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./dist/  # 替换为你的构建目录
-        asset_name: build-${{ github.run_id }}.zip
+        asset_path: ./build-${{ github.run_number }}.zip
+        asset_name: build-v${{ steps.package-version.outputs.version }}.zip
         asset_content_type: application/zip
-
-    # 可选：添加自动压缩构建产物的步骤
-    - name: Zip artifacts
-      run: |
-        cd dist && zip -r ../build-${{ github.run_id }}.zip .
-      if: success()
+    
+    - name: Cleanup
+      run: rm build-${{ github.run_number }}.zip
