@@ -28,7 +28,7 @@ jobs:
       run: npm ci --prefer-offline
 
     - name: Build project
-      run: npm run build  # 执行编译命令
+      run: npm run dev build  # 执行编译命令
 
     - name: Create Release
       id: create_release
