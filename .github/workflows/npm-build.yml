@@ -1,143 +1,38 @@
-name: VBlog CI/CD
+name: Vue 2 Build and Deploy
 
 on:
   push:
+    branches: [ master ]  # 触发分支，根据你的主分支名修改
+  pull_request:
     branches: [ master ]
-  workflow_dispatch: # 启用手动触发
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15 # 设置全局超时
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
-    
+
+    strategy:
+      matrix:
+        node-version: [16.x]  # Vue2 官方推荐 Node 14+，16.x LTS 更稳定
+
     steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v4
-    
-    - name: Setup Node.js
+
+    - name: Use Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v4
       with:
-        node-version: '6'
+        node-version: ${{ matrix.node-version }}
         cache: 'npm'
-    
-    - name: Cache dependencies
-      uses: actions/cache@v3
-      id: npm-cache
-      with:
-        path: |
-          node_modules
-          .npm
-        key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-
-    
+
     - name: Install dependencies
-      run: |
-        echo "开始安装依赖..."
-        npm ci --no-progress --loglevel=error
-        echo "依赖安装完成"
-    
+      run: npm install
+
     - name: Build project
-      id: build-step
-      run: |
-        echo "开始构建项目..."
-        # 使用 tee 命令同时输出到控制台和文件
-        npm run dev
-        npm run build 2>&1 | tee build.log
-        echo "构建完成"
-        
-        # 记录构建时间
-        echo "build_duration=$(($(date +%s) - $(date -d "$(cat build.log | head -1 | awk '{print $1, $2}')" +%s)))" >> $GITHUB_OUTPUT
-      env:
-        NODE_OPTIONS: "--max_old_space_size=4096" # 增加内存限制
-        VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || 'https://api.example.com' }}
-      timeout-minutes: 10 # 设置构建超时
-    
-    - name: Verify build output
-      run: |
-        echo "检查构建结果..."
-        if [ ! -d "dist" ]; then
-          echo "错误：dist 目录不存在"
-          exit 1
-        fi
-        
-        if [ ! -f "dist/index.html" ]; then
-          echo "错误：index.html 未生成"
-          exit 1
-        fi
-        
-        echo "构建验证通过"
-        du -sh dist/ # 显示构建目录大小
-    
-    - name: Setup Pages
-      uses: actions/configure-pages@v4
-    
+      run: npm run build
+
     - name: Upload artifact
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: dist
-    
-    - name: Deploy to GitHub Pages
-      id: deployment
-      uses: actions/deploy-pages@v4
-      if: ${{ github.ref == 'refs/heads/main' }}
-    
-    # 资源监控替代方案
-    - name: Monitor resources (built-in)
-      run: |
-        echo "===== 系统资源使用情况 ====="
-        echo "内存使用:"
-        free -m
-        echo "磁盘使用:"
-        df -h
-        echo "CPU使用:"
-        top -b -n 1 | head -5
-        echo "构建进程:"
-        ps aux | grep -E 'node|npm|vite' | grep -v grep || echo "无相关进程"
-    
-    # 上传构建日志
-    - name: Upload build logs
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs
-        path: |
-          build.log
-        if-no-files-found: ignore
-    
-    # 手动触发时创建 Release
-    - name: Zip artifacts (Manual Trigger)
-      if: ${{ github.event_name == 'workflow_dispatch' }}
-      run: |
-        cd dist
-        zip -r ../vblog-build-${{ github.run_number }}.zip .
-    
-    - name: Create Release and Upload Assets
-      if: ${{ github.event_name == 'workflow_dispatch' }}
-      uses: softprops/action-gh-release@v1
-      with:
-        name: "Build ${{ github.run_number }}"
-        tag_name: release-${{ github.run_id }}
-        body: |
-          **VBlog 手动构建发布**
-          - 提交: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
-          - 部署预览: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-          - 构建时间: ${{ steps.build-step.outputs.build_duration }} 秒
-        draft: false
-        prerelease: true
-        files: |
-          vblog-build-${{ github.run_number }}.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-    # 添加 Lighthouse 性能测试（使用官方 Action）
-    - name: Run Lighthouse audit
-      uses: treosh/lighthouse-ci-action@v11
-      with:
-        urls: |
-          https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-        uploadArtifacts: true
-        temporaryPublicStorage: true
+        name: dist
+        path: dist/
+        retention-days: 1
