@@ -1,55 +1,69 @@
-name: Vue 2 Minimal Build
+name: Vue 2 Diagnostic Build
 
 on:
-  push:
-    branches: [main, master]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch: # 仅手动触发
 
 jobs:
   build:
-    # 使用最轻量级的 Windows 环境
-    runs-on: windows-latest
-    timeout-minutes: 15  # 防止无限等待
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    # 跳过 Node.js 安装，直接使用系统 Node
-    - name: Use built-in Node.js
-      run: |
-        node --version
-        npm --version
-        
-    # 最小化依赖安装
-    - name: Install essential dependencies only
-      run: |
-        # 仅安装最核心的依赖
-        npm install vue@^2.5.2
-        npm install webpack@^3.6.0
-        npm install vue-loader@^13.3.0
-        npm install vue-template-compiler@^2.5.2
-        
-    # 尝试直接调用构建脚本
-    - name: Run build script directly
-      run: |
-        node build/build.js
-        
-    # 验证结果
-    - name: Check build output
-      run: |
-        if (Test-Path -Path dist) {
-          Write-Host "构建成功! 文件列表:"
-          Get-ChildItem -Path dist -Recurse | Select-Object Name, Length
-        } else {
-          Write-Host "构建失败: dist 目录不存在"
-          Exit 1
-        }
-        
-    # 上传结果
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
       with:
-        name: dist
-        path: dist
-        retention-days: 1
+        node-version: '14'
+        
+    # 阶段1: 仅记录环境信息
+    - name: Environment diagnostics
+      run: |
+        echo "Node.js版本: $(node --version)"
+        echo "npm版本: $(npm --version)"
+        echo "系统信息: $(uname -a)"
+        echo "内存信息: $(free -h || systeminfo | grep '内存')"
+        echo "磁盘空间: $(df -h)"
+        
+    # 阶段2: 最小依赖安装
+    - name: Install minimal dependencies
+      run: |
+        echo "安装核心依赖..."
+        npm install vue@^2.5.2 webpack@^3.6.0 vue-loader@^13.3.0 vue-template-compiler@^2.5.2 --no-save
+        echo "安装完成!"
+        
+    # 阶段3: 尝试部分构建
+    - name: Attempt partial build
+      run: |
+        echo "尝试创建基础配置..."
+        mkdir -p dist
+        echo "<h1>测试构建</h1>" > dist/index.html
+        
+        echo "尝试运行 webpack 命令..."
+        npx webpack --version || echo "Webpack 不可用"
+        
+        echo "尝试运行构建脚本..."
+        if [ -f build/build.js ]; then
+          node build/build.js --dry-run || echo "构建脚本执行失败"
+        else
+          echo "build.js 文件不存在"
+        fi
+        
+    # 阶段4: 完整依赖安装
+    - name: Install full dependencies
+      if: always()  # 无论之前步骤是否成功都执行
+      run: |
+        echo "完整安装依赖..."
+        npm install --legacy-peer-deps
+        echo "依赖列表:"
+        npm list --depth=0
+        
+    # 阶段5: 完整构建尝试
+    - name: Full build attempt
+      run: |
+        echo "尝试完整构建..."
+        npm run build --verbose || echo "构建失败"
+        
+        echo "构建输出:"
+        ls -lR dist || echo "无dist目录"
