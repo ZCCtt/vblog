@@ -1,69 +1,84 @@
-name: Vue 2 Diagnostic Build
+name: Vue 2 Release Build
 
 on:
-  workflow_dispatch: # 仅手动触发
+  workflow_dispatch: # 手动触发
+  release:
+    types: [created] # 当创建新发布时自动触发
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     
     steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v4
-      
+      with:
+        fetch-depth: 0 # 获取完整提交历史
+        
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '14'
+        cache: 'npm'
         
-    # 阶段1: 仅记录环境信息
     - name: Environment diagnostics
       run: |
+        echo "构建时间: $(date)"
         echo "Node.js版本: $(node --version)"
         echo "npm版本: $(npm --version)"
-        echo "系统信息: $(uname -a)"
-        echo "内存信息: $(free -h || systeminfo | grep '内存')"
-        echo "磁盘空间: $(df -h)"
+        echo "提交哈希: ${{ github.sha }}"
         
-    # 阶段2: 最小依赖安装
-    - name: Install minimal dependencies
+    - name: Install dependencies
       run: |
-        echo "安装核心依赖..."
-        npm install vue@^2.5.2 webpack@^3.6.0 vue-loader@^13.3.0 vue-template-compiler@^2.5.2 --no-save
-        echo "安装完成!"
-        
-    # 阶段3: 尝试部分构建
-    - name: Attempt partial build
-      run: |
-        echo "尝试创建基础配置..."
-        mkdir -p dist
-        echo "<h1>测试构建</h1>" > dist/index.html
-        
-        echo "尝试运行 webpack 命令..."
-        npx webpack --version || echo "Webpack 不可用"
-        
-        echo "尝试运行构建脚本..."
-        if [ -f build/build.js ]; then
-          node build/build.js --dry-run || echo "构建脚本执行失败"
-        else
-          echo "build.js 文件不存在"
-        fi
-        
-    # 阶段4: 完整依赖安装
-    - name: Install full dependencies
-      if: always()  # 无论之前步骤是否成功都执行
-      run: |
-        echo "完整安装依赖..."
-        npm install --legacy-peer-deps
+        npm install --legacy-peer-deps --no-audit --no-optional
         echo "依赖列表:"
         npm list --depth=0
         
-    # 阶段5: 完整构建尝试
-    - name: Full build attempt
+    - name: Build production bundle
       run: |
-        echo "尝试完整构建..."
-        npm run build --verbose || echo "构建失败"
+        echo "开始生产构建..."
+        npm run build --verbose
         
         echo "构建输出:"
-        ls -lR dist || echo "无dist目录"
+        du -sh dist/*
+        
+    - name: Package build artifacts
+      run: |
+        cd dist
+        zip -r ../release-${{ github.run_id }}.zip .
+        echo "打包完成!"
+        
+    - name: Upload release asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./release-${{ github.run_id }}.zip
+        asset_name: release-build-${{ github.run_id }}.zip
+        asset_content_type: application/zip
+        
+    - name: Deploy to GitHub Pages (可选)
+      if: success()
+      uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./dist
+        force_orphan: true
+        
+    - name: Create build report
+      if: always()
+      run: |
+        echo "构建状态: ${{ job.status }}" > build-report.txt
+        echo "运行ID: ${{ github.run_id }}" >> build-report.txt
+        echo "提交: ${{ github.sha }}" >> build-report.txt
+        echo "触发者: ${{ github.actor }}" >> build-report.txt
+        date >> build-report.txt
+        
+    - name: Upload build report
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-report
+        path: build-report.txt
+        retention-days: 7
