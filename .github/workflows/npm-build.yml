@@ -1,9 +1,11 @@
-name: Vue 2 Release Build
+name: Build and Deploy to External Repo
 
 on:
   workflow_dispatch: # 手动触发
+  push:
+    branches: [main] # 主分支推送时触发
   release:
-    types: [created] # 当创建新发布时自动触发
+    types: [created] # 创建 Release 时触发
 
 jobs:
   build:
@@ -11,74 +13,104 @@ jobs:
     timeout-minutes: 20
     
     steps:
-    - name: Checkout repository
+    - name: Checkout source repository
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0 # 获取完整提交历史
-        
+      
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '14'
         cache: 'npm'
         
-    - name: Environment diagnostics
-      run: |
-        echo "构建时间: $(date)"
-        echo "Node.js版本: $(node --version)"
-        echo "npm版本: $(npm --version)"
-        echo "提交哈希: ${{ github.sha }}"
-        
     - name: Install dependencies
-      run: |
-        npm install --legacy-peer-deps --no-audit --no-optional
-        echo "依赖列表:"
-        npm list --depth=0
+      run: npm install --legacy-peer-deps --no-audit --no-optional
         
     - name: Build production bundle
-      run: |
-        echo "开始生产构建..."
-        npm run build --verbose
-        
-        echo "构建输出:"
-        du -sh dist/*
-        
+      run: npm run build
+      
     - name: Package build artifacts
       run: |
         cd dist
-        zip -r ../release-${{ github.run_id }}.zip .
-        echo "打包完成!"
+        zip -r ../dist-artifact.zip .
         
-    - name: Upload release asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./release-${{ github.run_id }}.zip
-        asset_name: release-build-${{ github.run_id }}.zip
-        asset_content_type: application/zip
-        
-    - name: Deploy to GitHub Pages (可选)
-      if: success()
-      uses: peaceiris/actions-gh-pages@v4
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./dist
-        force_orphan: true
-        
-    - name: Create build report
-      if: always()
-      run: |
-        echo "构建状态: ${{ job.status }}" > build-report.txt
-        echo "运行ID: ${{ github.run_id }}" >> build-report.txt
-        echo "提交: ${{ github.sha }}" >> build-report.txt
-        echo "触发者: ${{ github.actor }}" >> build-report.txt
-        date >> build-report.txt
-        
-    - name: Upload build report
+    - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: build-report
-        path: build-report.txt
+        name: dist-artifact
+        path: dist-artifact.zip
+        retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Deploy to Target Repository
+    
+    steps:
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: dist-artifact
+        path: dist-content
+        
+    - name: Extract build artifacts
+      run: |
+        unzip dist-content/dist-artifact.zip -d dist-unpacked
+        echo "构建内容:"
+        ls -l dist-unpacked
+        
+    # 配置目标仓库
+    - name: Checkout target repository
+      uses: actions/checkout@v4
+      with:
+        repository: ZCCtt/ZCCtt.github.io # 替换为目标仓库
+        token: ${{ secrets.TARGET_REPO_TOKEN }} # 目标仓库的访问令牌
+        path: target-repo
+        ref: main # 目标分支
+        
+    - name: Clean target repository
+      run: |
+        cd target-repo
+        # 删除除 .git 外的所有文件
+        if [ -d .git ]; then
+          find . -mindepth 1 -not -path './.git*' -delete
+        else
+          echo "错误: .git 目录不存在"
+          exit 1
+        fi
+        
+    - name: Copy build artifacts
+      run: |
+        # 复制构建产物到目标仓库
+        cp -a dist-unpacked/. target-repo/
+        echo "复制后目标仓库内容:"
+        ls -la target-repo
+        
+    - name: Configure Git
+      run: |
+        cd target-repo
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        
+    - name: Commit and push to target repository
+      run: |
+        cd target-repo
+        git add --all
+        git status
+        git commit -m "Deploy from ${{ github.repository }}@${{ github.sha }}"
+        git push origin main
+        
+    - name: Create deployment report
+      run: |
+        echo "部署报告" > report.txt
+        echo "源仓库: ${{ github.repository }}" >> report.txt
+        echo "源提交: ${{ github.sha }}" >> report.txt
+        echo "目标仓库: username/target-repo" >> report.txt
+        echo "目标分支: main" >> report.txt
+        echo "部署时间: $(date)" >> report.txt
+        
+    - name: Upload deployment report
+      uses: actions/upload-artifact@v4
+      with:
+        name: deployment-report
+        path: report.txt
         retention-days: 7
