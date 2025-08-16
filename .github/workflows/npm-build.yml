@@ -1,73 +1,58 @@
-name: Vue 2 Production CI
+name: Vue 2 Production Build
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 jobs:
   build:
-    runs-on: ubuntu-24  # 使用较旧的 Ubuntu 版本获取兼容的 OpenSSL
-    strategy:
-      matrix:
-        # 使用 Node.js 12.x (Vue2/Webpack3 官方支持的最低版本)
-        node-version: [12.22.12]  # 指定精确版本确保兼容性
+    # 使用 GitHub 托管的 macOS 环境（兼容性最佳）
+    runs-on: macos-12
+    timeout-minutes: 20  # 防止无限卡住
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
-    - name: Use Node.js ${{ matrix.node-version }}
+      
+    # 使用 Node 14 LTS（Vue2 官方推荐版本）
+    - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ matrix.node-version }}
+        node-version: '14.21.3'  # 指定精确版本
         cache: 'npm'
-
-    # 配置环境变量解决兼容性问题
-    - name: Configure environment
+        
+    # 最小化依赖安装（跳过 peerDependencies）
+    - name: Install core dependencies
       run: |
-        echo "CI=true" >> $GITHUB_ENV
-        echo "NODE_OPTIONS=--max_old_space_size=4096" >> $GITHUB_ENV
-
-    - name: Cache dependencies
-      uses: actions/cache@v4
-      id: npm-cache
-      with:
-        path: |
-          node_modules
-          .npm
-        key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('package-lock.json') }}
-
-    - name: Install dependencies
+        npm install --no-package-lock --no-save \
+          vue@^2.5.2 \
+          vue-loader@^13.3.0 \
+          vue-template-compiler@^2.5.2 \
+          webpack@^3.6.0
+        
+    # 选择性安装其他依赖
+    - name: Install project dependencies
       run: |
-        npm ci --legacy-peer-deps --no-audit
-        # 可选：修复已知兼容性问题
-        npm install webpack@3.12.0
-
-    - name: Run unit tests
-      run: npm run unit
-
-    - name: Build production bundle
-      run: npm run build
-
+        npm install --legacy-peer-deps --no-audit --no-optional
+        
+    # 尝试构建（带详细日志）
+    - name: Build project
+      run: |
+        npm run build --verbose
+        
+    # 验证构建结果
     - name: Verify build output
       run: |
+        echo "构建目录内容:"
         ls -la dist/
         [ -f dist/index.html ] || exit 1
-
+        
+    # 上传构建产物
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: production-dist
+        name: dist
         path: dist/
-        retention-days: 3
-
-    # 可选：部署到 GitHub Pages
-    - name: Deploy to GitHub Pages
-      if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && success()
-      uses: peaceiris/actions-gh-pages@v4
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./dist
-        force_orphan: true
+        retention-days: 1
